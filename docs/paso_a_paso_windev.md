@@ -7,9 +7,9 @@ Esta guia complementa `docs/wlanguage_flow.md` y describe el proceso completo qu
 2. Ejecuta `sql/00_prerequisites.sql` (ya apunta a la base `joso`; solo cambia el `USE` si trabajas en otra base).
    - Verifica en el explorador de objetos que `coop.Autorizacion_Pago.dBaja` acepta valores nulos.
    - Confirma que existe el `DEFAULT` en `dAlta` consultando `sys.default_constraints` o inspeccionando la columna.
-3. Ejecuta `sql/20_usp_autorizar_pago_registrar.sql` para crear el procedimiento almacenado.
+3. Verifica que el archivo `sql/20_usp_autorizar_pago_registrar.sql` se haya ejecutado al menos una vez para eliminar el procedimiento legado (el código ahora vive en la aplicación).
 4. Opcional: ejecuta consultas de `sql/10_lookup_queries.sql` para validar que retornan datos correctos para una persona real.
-5. Si necesitas una version resumida, practica primero con `sql/12_basic_queries.sql` (solo SELECT/INSERT) y luego migra al procedimiento completo.
+5. Si necesitas una version resumida, practica primero con `sql/12_basic_queries.sql` (solo SELECT/INSERT) y luego migra a la lógica transaccional incluida en la interfaz.
 
 ## 2. Configurar la conexion en WinDev/WebDev
 1. En el editor, abre el panel *Analysis* o crea una nueva conexion en *HFSQL/External Databases*.
@@ -35,14 +35,12 @@ Esta guia complementa `docs/wlanguage_flow.md` y describe el proceso completo qu
 2. **Evento clic de `BTN_Guardar`**
    - Valida que `nPersonaIDSeleccionada` > 0 y que `EDT_Monto` > 0.
    - Usa `YesNo` para confirmar la operacion.
-   - Construye la llamada al procedimiento: 
-     ```wlanguage
-     HExecuteSQLQuery(dsResultado, hQueryWithoutCorrection, \
-         "EXEC coop.usp_AutorizarPagoRegistrar @nPersonaID=%1, @nNumSocio=%2, @mMonto=%3, @nPersonaIDModifica=%4", \
-         nPersonaIDSeleccionada, EDT_NumSocio, EDT_Monto, gnUsuarioSesion)
-     ```
-   - Si hay error, muestra `Error()` y refiere a `cat.Errores`.
-   - Si es exitoso, refresca mensaje/historial ejecutando nuevamente las consultas de apoyo.
+    - Ejecuta la secuencia manual (ver `docs/wlanguage_flow.md`) que envuelve en una transacción los pasos:
+       1. `UPDATE coop.Autorizacion_Pago SET dBaja = CAST(GETDATE() AS DATE)` para cerrar el pago activo (si existe).
+       2. `INSERT INTO coop.Autorizacion_Pago (...) VALUES (..., NULL, CAST(GETDATE() AS DATE), ...)` para crear el nuevo registro.
+    - Usa `HExecuteSQLQuery` con los parámetros `%1 = nPersonaIDSeleccionada`, `%2 = gnUsuarioSesion`, `%3 = NumSocio normalizado` y `%4 = EDT_Monto`.
+    - Si hay error, muestra `Error()` y refiere a `cat.Errores`.
+    - Si es exitoso, refresca mensaje/historial ejecutando nuevamente las consultas de apoyo.
 3. **Evento clic de `BTN_Limpiar`**
    - Limpia tablas, controles y variable `nPersonaIDSeleccionada` como se detalla en `wlanguage_flow.md`.
 

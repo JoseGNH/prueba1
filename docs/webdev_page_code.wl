@@ -26,7 +26,6 @@ GLOBAL
     qryBuscarSocios is Query  // requiere parámetro ParamTextoBusqueda (tipo string)
     qryEstadoPersona is Query // requiere parámetro ParamPersonaID (tipo int)
     qryHistorialPagos is Query // parámetro ParamPersonaID
-    qryInsertPago is Query // parámetros: ParamPersonaID, ParamNumSocio, ParamMonto, ParamPersonaIDModifica
 END
 
 // ----------------------------------------------------------------
@@ -205,14 +204,52 @@ TableSelectPlus(TABLE_Pagos, 0)
 gnPersonaIDSeleccionada = 0
 
 // ---------------------------------------------------------------
-PROCEDURE GuardarPago_Query(nPersonaID is int, nNumSocio is int, mMonto is currency)
-qryInsertPago.ParamPersonaID = nPersonaID
-qryInsertPago.ParamNumSocio = nNumSocio
-qryInsertPago.ParamMonto = mMonto
-qryInsertPago.ParamPersonaIDModifica = gnUsuarioSesion
+PROCEDURE RegistrarPagoManual(nPersonaID is int, nNumSocio is int, mMonto is currency)
+IF nPersonaID <= 0 THEN RESULT False
 
-IF NOT HExecuteQuery(qryInsertPago, hQueryDefault) THEN
-    Error("Error al ejecutar qryInsertPago:", HErrorInfo(hErrMessage))
+LOCAL nNumSocioNormalizado is int = nNumSocio
+IF nNumSocioNormalizado <= 0 THEN nNumSocioNormalizado = 0
+
+LOCAL cTransaccionSQL is ANSI string = [
+    BEGIN TRY
+        BEGIN TRAN;
+
+        UPDATE coop.Autorizacion_Pago
+        SET dBaja = CAST(GETDATE() AS DATE),
+            nPersonaIDModifica = %2
+        WHERE nPersonaID = %1
+          AND dBaja IS NULL;
+
+        INSERT INTO coop.Autorizacion_Pago
+        (
+            nPersonaID,
+            nNumSocio,
+            mMonto,
+            dBaja,
+            dAlta,
+            nPersonaIDModifica
+        )
+        VALUES
+        (
+            %1,
+            %3,
+            %4,
+            NULL,
+            CAST(GETDATE() AS DATE),
+            %2
+        );
+
+        COMMIT TRAN;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+        THROW;
+    END CATCH;
+]
+
+IF NOT HExecuteSQLQuery(dsGuardar, gclConexion, hQueryWithoutCorrection, cTransaccionSQL, \
+        nPersonaID, gnUsuarioSesion, nNumSocioNormalizado, mMonto) THEN
+    Error("Ocurrió un error al registrar el pago. Consulta cat.Errores para más detalle.", HErrorInfo(hErrMessage))
     RESULT False
 END
 
@@ -271,22 +308,7 @@ END
 
 IF YesNo("¿Está seguro de registrar el pago?") = No THEN RETURN
 
-LOCAL cInsertSQL is ANSI string = [
-    EXEC coop.usp_AutorizarPagoRegistrar 
-        @nPersonaID = %1,
-        @nNumSocio = %2,
-        @mMonto = %3,
-        @nPersonaIDModifica = %4
-];
-
-IF NOT HExecuteSQLQuery(dsGuardar, gclConexion, hQueryWithoutCorrection, cInsertSQL, \
-        gnPersonaIDSeleccionada, EDT_NumSocio, EDT_Monto, gnUsuarioSesion) THEN
-    Error("Ocurrió un error al guardar el pago. Avisar a sistemas.", HErrorInfo(hErrMessage))
-    RETURN
-END
-
-// Alternativa usando la query qryInsertPago:
-// IF NOT GuardarPago_Query(gnPersonaIDSeleccionada, EDT_NumSocio, EDT_Monto) THEN RETURN
+IF NOT RegistrarPagoManual(gnPersonaIDSeleccionada, EDT_NumSocio, EDT_Monto) THEN RETURN
 
 Info("Pago registrado correctamente.")
 ActualizarContextoPersona()
@@ -303,7 +325,6 @@ LimpiarPantalla()
 //  - qryBuscarSocios (param: ParamTextoBusqueda, tipo string)
 //  - qryEstadoPersona (param: ParamPersonaID, tipo int)
 //  - qryHistorialPagos (param: ParamPersonaID, tipo int)
-//  - qryInsertPago (params: ParamPersonaID, ParamNumSocio, ParamMonto, ParamPersonaIDModifica)
 // Cada query debe usar la conexión gclConexion (configúrala en la Analysis).
 // Si optas por las queries visuales, utiliza las funciones *_Query() en lugar de las que ejecutan SQL embebido.
 

@@ -1,12 +1,12 @@
 # Flujo WebDev - Autorizacion de Pagos
 
 ## Controles involucrados
-- `EST_Busqueda`: campo de entrada para buscar personas. Dispara la consulta al presionar Enter.
-- `TABLE_Personas`: tabla ya poblada con Numero de Socio, Nombre y PersonaID.
+- `EDT_Busqueda`: campo de entrada para buscar personas. Dispara la consulta al presionar Enter.
+- `TABLE_Empleados`: tabla ya poblada con Numero de Socio, Nombre y PersonaID.
 - `STC_Mensaje`: etiqueta que muestra el mensaje dinamico.
 - `EDT_NumSocio`: editable que mostrara el numero de socio (usar 0 cuando la persona no tenga).
 - `EDT_Monto`: editable para capturar el monto.
-- `BTN_Guardar`: boton para confirmar el registro.
+- `BTN_Guardar`: boton para confirmar el registro. La lógica se ejecuta desde WLanguage (sin procedimiento almacenado) y después limpia los controles/tabla como parte del flujo.
 - `BTN_Limpiar`: boton para limpiar controles y estado.
 
 ## Variables recomendadas
@@ -87,17 +87,50 @@ END
 
 IF YesNo("¿Esta seguro de querer registrar el pago?") = No THEN RETURN
 
-// Ejecutar sql/20_usp_autorizar_pago_registrar.sql mediante HExecuteSQLQuery
-qs is ANSI string = [
-    EXEC coop.usp_AutorizarPagoRegistrar 
-        @nPersonaID = %1,
-        @nNumSocio = %2,
-        @mMonto = %3,
-        @nPersonaIDModifica = %4
+// Normalizar número de socio (0 cuando sea vacío o negativo)
+nNumSocioNormalizado is int = EDT_NumSocio
+IF nNumSocioNormalizado <= 0 THEN nNumSocioNormalizado = 0
+
+// Construir la transacción manual: actualizar pago previo e insertar el nuevo
+qsTransaccion is ANSI string = [
+    BEGIN TRY
+        BEGIN TRAN;
+
+        UPDATE coop.Autorizacion_Pago
+        SET dBaja = CAST(GETDATE() AS DATE),
+            nPersonaIDModifica = %2
+        WHERE nPersonaID = %1
+          AND dBaja IS NULL;
+
+        INSERT INTO coop.Autorizacion_Pago
+        (
+            nPersonaID,
+            nNumSocio,
+            mMonto,
+            dBaja,
+            dAlta,
+            nPersonaIDModifica
+        )
+        VALUES
+        (
+            %1,
+            %3,
+            %4,
+            NULL,
+            CAST(GETDATE() AS DATE),
+            %2
+        );
+
+        COMMIT TRAN;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+        THROW;
+    END CATCH;
 ]
 
-IF NOT HExecuteSQLQuery(dsResultado, hQueryWithoutCorrection, qs, \
-        nPersonaIDSeleccionada, EDT_NumSocio, EDT_Monto, nUsuarioSesion) THEN
+IF NOT HExecuteSQLQuery(dsGuardar, hQueryWithoutCorrection, qsTransaccion, \
+    nPersonaIDSeleccionada, nUsuarioSesion, nNumSocioNormalizado, EDT_Monto) THEN
     Error("Ocurrio un error. Favor de notificar a los desarrolladores. Revisar tabla cat.Errores.")
     RETURN
 END

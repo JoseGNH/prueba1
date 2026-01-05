@@ -1,38 +1,36 @@
 /*
-    Procedimiento que registra pagos en coop.Autorizacion_Pago
-    y documenta cualquier error en cat.Errores.
+    La lógica de registro de pagos ahora se controla desde la capa de aplicación.
+    Este script elimina el procedimiento almacenado previo y documenta las sentencias
+    que debe invocar la interfaz para mantener la misma regla de negocio.
 */
 USE joso;
 GO
 
 IF OBJECT_ID('coop.usp_AutorizarPagoRegistrar', 'P') IS NOT NULL
+BEGIN
     DROP PROCEDURE coop.usp_AutorizarPagoRegistrar;
+    PRINT 'Procedimiento coop.usp_AutorizarPagoRegistrar eliminado. La lógica vive en la aplicación.';
+END
+ELSE
+BEGIN
+    PRINT 'El procedimiento coop.usp_AutorizarPagoRegistrar no existe. Sin cambios.';
+END;
 GO
 
-CREATE PROCEDURE coop.usp_AutorizarPagoRegistrar
-    @nPersonaID          BIGINT,
-    @nNumSocio           BIGINT = NULL,
-    @mMonto              MONEY,
-    @nPersonaIDModifica  BIGINT,
-    @eSistema            INT = 1,
-    @sSoluciones         VARCHAR(MAX) = NULL,
-    @sSolucionesProgramador VARCHAR(MAX) = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @Hoy DATE = CAST(GETDATE() AS DATE);
-    DECLARE @NumSocio BIGINT = ISNULL(NULLIF(@nNumSocio,0), 0);
+/*
+    Secuencia sugerida para ejecutar desde la capa de aplicación (WebDev/WLanguage):
 
     BEGIN TRY
         BEGIN TRAN;
 
+        -- 1) Marcar como histórico cualquier pago activo de la persona.
         UPDATE coop.Autorizacion_Pago
-        SET dBaja = @Hoy,
-            nPersonaIDModifica = @nPersonaIDModifica
+        SET dBaja = CAST(GETDATE() AS DATE),
+            nPersonaIDModifica = @nUsuario
         WHERE nPersonaID = @nPersonaID
           AND dBaja IS NULL;
 
+        -- 2) Insertar el nuevo pago con dBaja = NULL y dAlta = fecha actual.
         INSERT INTO coop.Autorizacion_Pago
         (
             nPersonaID,
@@ -45,48 +43,21 @@ BEGIN
         VALUES
         (
             @nPersonaID,
-            @NumSocio,
+            @nNumSocioNormalizado, -- usar 0 cuando la persona no tenga número de socio.
             @mMonto,
             NULL,
-            @Hoy,
-            @nPersonaIDModifica
+            CAST(GETDATE() AS DATE),
+            @nUsuario
         );
-
-        DECLARE @NuevoAutorizarPagoID BIGINT = SCOPE_IDENTITY();
 
         COMMIT TRAN;
-
-        SELECT @NuevoAutorizarPagoID AS NuevoAutorizarPagoID;
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRAN;
-
-        DECLARE 
-            @ErrorNumber   INT = ERROR_NUMBER(),
-            @ErrorSeverity INT = ERROR_SEVERITY(),
-            @ErrorState    INT = ERROR_STATE(),
-            @ErrorLine     INT = ERROR_LINE(),
-            @ErrorMessage  NVARCHAR(4000) = ERROR_MESSAGE();
-
-        INSERT INTO cat.Errores
-        (
-            eSistema,
-            sCodigoError,
-            sMensajeError,
-            sSoluciones,
-            sSolucionesProgramador
-        )
-        VALUES
-        (
-            @eSistema,
-            CONCAT('SQL-', @ErrorNumber, '-', @ErrorLine),
-            @ErrorMessage,
-            @sSoluciones,
-            ISNULL(@sSolucionesProgramador, 'Validar transaccion de pago y datos capturados.')
-        );
-
-        RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState);
+        IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+        DECLARE @Mensaje NVARCHAR(4000) = ERROR_MESSAGE();
+        -- Registrar en cat.Errores si se requiere auditoría/reporte.
+        THROW;
     END CATCH;
-END;
-GO
+
+    Adapta los nombres de parámetros a tu código WLanguage.
+*/

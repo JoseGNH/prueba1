@@ -33,22 +33,38 @@ DECLARE @NuevoNumSocio BIGINT = 0; -- mandar 0 si es nuevo
 DECLARE @NuevoMonto MONEY = 0;
 DECLARE @PersonaIDModifica BIGINT = 0; -- usuario logueado
 
-INSERT INTO coop.Autorizacion_Pago
-(
-    nPersonaID,
-    nNumSocio,
-    mMonto,
-    dAlta,
-    dBaja,
-    nPersonaIDModifica
-)
-VALUES
-(
-    @NuevoPersonaID,
-    @NuevoNumSocio,
-    @NuevoMonto,
-    CAST(GETDATE() AS DATE),
-    NULL,
-    @PersonaIDModifica
-);
+BEGIN TRY
+    BEGIN TRAN;
+
+    UPDATE coop.Autorizacion_Pago
+    SET dBaja = CAST(GETDATE() AS DATE),
+        nPersonaIDModifica = @PersonaIDModifica
+    WHERE nPersonaID = @NuevoPersonaID
+      AND dBaja IS NULL;
+
+    INSERT INTO coop.Autorizacion_Pago
+    (
+        nPersonaID,
+        nNumSocio,
+        mMonto,
+        dAlta,
+        dBaja,
+        nPersonaIDModifica
+    )
+    VALUES
+    (
+        @NuevoPersonaID,
+        @NuevoNumSocio,
+        @NuevoMonto,
+        CAST(GETDATE() AS DATE),
+        NULL,
+        @PersonaIDModifica
+    );
+
+    COMMIT TRAN;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+    THROW;
+END CATCH;
 GO
