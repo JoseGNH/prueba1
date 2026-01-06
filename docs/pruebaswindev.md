@@ -13,10 +13,15 @@ sCondition is string = StringBuild("nPersonaID = %1 AND dBaja IS NULL", nIDPerso
 HFilter(Autorizacion_Pago1, sCondition)
 HReadFirst(Autorizacion_Pago1)
 
-// 3. If found, update the PREVIOUS record with today's date
-IF NOT HOut(Autorizacion_Pago1) THEN
-	Autorizacion_Pago1.dBaja = DateSys() 
-	HModify(Autorizacion_Pago1)
+// 3. If found, update each active record with today's date
+WHILE NOT HOut(Autorizacion_Pago1)
+	Autorizacion_Pago1.dBaja = DateSys()
+	IF NOT HModify(Autorizacion_Pago1) THEN
+		Error("Error al cerrar registro previo: " + HErrorInfo(hErrFullDetails))
+		HDeactivateFilter(Autorizacion_Pago1)
+		RETURN
+	END
+	HNext(Autorizacion_Pago1)
 END
 
 // 4. Clear context for the new insert
